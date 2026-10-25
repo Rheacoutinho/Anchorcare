@@ -1,68 +1,154 @@
-# AnchorCare + Engram
+# Engram Demo (AnchorCare Multimodal Companion)
 
-AnchorCare's original React/TypeScript prototype with Engram's MongoDB retrieval and proactive-trigger component integrated into the Express backend.
+An AI-powered voice, visual, and memory companion tailored for individuals living with dementia and memory loss (configured for patient **Rhea**), complete with proactive caregiver alerts, Telegram sentinel bot integration, and live GPS map pinning.
 
-## Run
+---
 
-Requires Node.js 22.12+ (tested with 24.22.1). Vite 8 does not support the previously installed Node 20.18 runtime.
+## 🌟 Key Architecture & Capabilities
 
-```sh
-npm ci --ignore-scripts --no-audit --no-fund
-# Copy .env.example to a private .env and configure it locally.
+### 1. Multimodal Real-Time Interface
+- **Audio & Voice Interaction:** Continuous speech capture with browser Web Audio API analyzer; patient pauses do not reset the transcript buffer.
+- **Visual Context Capture:** Real-time webcam frame snapshots transmitted to the backend alongside voice input.
+- **Low-Latency Streaming:** Direct WebSocket pipeline via Socket.IO for immediate transcription, grounding, and synthesized text-to-speech (TTS) responses.
+
+### 2. Tiered Safety Guardrails & Anti-Hallucination Engine
+- **Stage 1 (Clinical & Safety Guardrails):**
+  - **Medication & Dosage Inquiries:** Strictly prevents clinical advice. Politely informs the patient that their caregiver has been alerted to review their care plan.
+  - **Physical Emergencies & Falls:** Immediate de-escalation instructions with high-priority caregiver notification.
+  - **Acute Distress & Disorientation:** Grounding and comforting responses tailored for memory loss patients.
+- **Stage 2 (Database Memory Recall Priority):**
+  - Evaluates queries against persistent MongoDB Atlas records (`engram.memories`, `engram.episodes`, `engram.conversations`).
+  - Strict anti-hallucination barrier: If a personal activity (meals, walks, visitors) is missing from the database, the model will **never fabricate an answer** and responds: `"I do not have a record of that yet Rhea."`
+- **Stage 3 (Generic Gemini LLM Layer):**
+  - Safe everyday conversational queries (time, date, general knowledge) routed through Gemini (temperature 0.1) with clinical post-generation safety checks.
+
+### 3. Caregiver Telegram Sentinel (`@Anchorcarebot`)
+- **Automated Alerts:** Dispatches real-time markdown notifications directly to the caregiver's Telegram for falls, distress, or medication questions.
+- **GPS Map Pinning:** Attaches clickable Google Maps links and native Telegram interactive map cards to emergency notices.
+- **On-Demand Location Querying:** Caregivers can query live GPS coordinates at any time by sending `"where is rhea"` or `"location"` to the bot.
+- **On-Demand Privacy Toggles:** Location sharing can be enabled/disabled at any time via Telegram commands (`enable location` / `disable location`).
+
+### 4. Surroundings & Nearby Venue Discovery
+- Patient queries like *"What is near me?"*, *"Can you find restaurants nearby?"*, or *"Are there stores or gas stations around?"* use live GPS coordinates and OpenStreetMap geocoding to return exact nearby businesses and streets.
+
+---
+
+## 📁 Repository Structure
+
+```
+├── backend/
+│   ├── agents/
+│   │   ├── safetyAgent.js      # Emergency detection, GPS pinning, and Telegram alert dispatcher
+│   │   ├── telegramAgent.js    # Telegram long-polling bot listener for @Anchorcarebot
+│   │   └── caregiverAgent.js   # Caregiver summary and timeline generator
+│   ├── gemini.js               # Multi-tiered guardrail engine, geocoding & factual memory search
+│   ├── models.js               # Mongoose schemas for MongoDB Atlas 'engram' database
+│   ├── server.js               # Express + Socket.IO multimodal backend server (port 5000)
+│   ├── tts.js                  # Speech synthesis layer
+│   └── test_guardrails.js      # Automated guardrail test suite
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx             # Voice, video, and text companion interface for Rhea
+│   │   ├── CaregiverPortal.jsx # Live caregiver review portal with alert badges & timeline
+│   │   └── services/socket.js  # Socket.IO client configuration
+│   └── vite.config.js
+├── adapter/                    # AnchorCare ingestion adapter & unit test suite
+└── team-handoff/               # Contracts, API specifications, and schemas
+```
+
+---
+
+## 🚀 Quick Start & Setup
+
+### Prerequisites
+- Node.js (v20+ recommended)
+- A MongoDB Atlas cluster (targeting the `engram` database)
+- Gemini API Key
+- Telegram Bot Token (e.g., from `@BotFather`)
+
+---
+
+### Step 1: Clone the Repository
+```bash
+git clone https://github.com/Rheacoutinho/enegram-demo.git
+cd enegram-demo
+```
+
+---
+
+### Step 2: Configure Environment Variables
+
+Create a `.env` file inside the `backend/` directory:
+```bash
+# backend/.env
+PORT=5000
+MONGODB_URI=mongodb+srv://<USERNAME>:<PASSWORD>@<CLUSTER>.mongodb.net/engram?retryWrites=true&w=majority
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+TELEGRAM_CAREGIVER_CHAT_ID=your_chat_id_or_leave_empty_to_autolink
+```
+
+---
+
+### Step 3: Start the Backend Server
+
+```bash
+cd backend
+npm install
+npm run dev
+# or: node server.js
+```
+The backend will connect to MongoDB Atlas and start listening on **`http://localhost:5000`** while launching the Telegram bot listener.
+
+---
+
+### Step 4: Start the Frontend Companion
+
+Open a second terminal window:
+```bash
+cd frontend
+npm install
 npm run dev
 ```
+Open **`http://localhost:5173`** in your browser.
 
-Open http://127.0.0.1:3000 and choose **Open persistent memory workspace**. Enter the private ANCHORCARE_ADMIN_KEY for caregiver actions or ANCHORCARE_COMPANION_KEY for patient reads/responses. Keys remain in page memory and are not put in localStorage. The React role switcher in the original demo does not grant server caregiver permissions.
+---
 
-For real Atlas storage set STORE=mongodb and configure MONGODB_URI. Keep ANCHORCARE_PATIENT_ID in SUBJECT_IDS; the bridge uses this server-configured patient and ignores client-supplied patient IDs. Set distinct strong ADMIN_TOKEN/COMPANION_TOKEN and separate ANCHORCARE_ADMIN_KEY/ANCHORCARE_COMPANION_KEY values. Never commit .env. The server binds to loopback by default.
+## 🧪 Testing the Guardrails
 
-## What is connected
+To verify that the medical and emergency guardrails are working properly without starting the web app, run:
 
-- `engram-retrieval/` contains Athul's tested backend component, copied from 4thul-jk/Engram-Hackathon at commit 22b37bb, including its tests, setup scripts and documentation.
-- `integration/engram.ts` mounts `/api/engram/*` inside AnchorCare's Express process. The same process connects to Atlas and runs the reminder worker. No second server or database credentials in browser code are required.
-- `src/components/EngramMemoryView.tsx` provides source-backed draft ingestion, caregiver approval/withdrawal, unified memory retrieval, optional Gemini answers and approved reminder creation/cancellation/responses.
-- `/api/engram/answer` retrieves evidence on the server; it does not trust browser-supplied evidence. With no Gemini key it explicitly returns evidence_only, not a fake model answer. With a key it uses GEMINI_MODEL (default gemini-4-argon), Interactions structured output and typed citation membership checks with a fresh retrieval before response.
-- Existing daily/person records and context-trigger endpoints are mounted and documented in the component. Stream Processing remains prepared but not deployed; CONTEXT_PROCESSING stays local.
-
-The main **Memory Ledger** loads/saves through Atlas-backed routes with review and correction history. The main **Patient Companion** now asks the authenticated server, which selects Atlas records by question/time and displays evidence plus current reminders. Original browser companion/ledger examples remain collapsed separately. Policy & Actions and the Python reference view are still browser demos, not migrated server workflows. No browser sample data is silently promoted into approved memory.
-
-## Important boundaries
-
-This is a local synthetic-data integration. Entered keys are shared prototype credentials, not production user authentication. Production needs individual sessions, patient/guardian authorization and HTTPS before external access. The server-selected single patient does not implement a multi-patient login system.
-
-No audio/video upload, face recognition, guardian calling, emergency response or clinical decision system is added. Citation/quote membership does not prove semantic support. Medical self-reports and plans retain their meaning; no medication instructions are executed. The old client-context `/api/gemini/reason` endpoint is disabled with HTTP 410. `/api/engram/ask` retrieves its own evidence and optionally invokes Gemini; a model outage is shown as failure, not silently replaced with browser sample answers.
-
-Long-running operations can still overlap approval changes; refreshed citations reduce, but do not eliminate, races. Server ledger corrections now use a MongoDB transaction covering original/replacement/source/audit writes; replacements begin as drafts. Browser demo correction tests alone do not prove this behaviour; a separate live HTTP/Atlas correction check has passed.
-
-## Validation
-
-For realistic fictional patient records, run `npm run demo:seed-atlas`, then `npm run demo:verify-atlas` against the running app. See [demo scenario and questions](docs/DEMO-DATA.md). No real patient data is included.
-
-```sh
-npm test
-npm run test:memory
-npm run lint
-npm run build
+```bash
+cd backend
+node test_guardrails.js
 ```
 
-See [integration notes](docs/ANCHORCARE-INTEGRATION.md) for exact verification and remaining work. Engram APIs: [unified context](engram-retrieval/MEMORY-CONTEXT.md), [team handoff](engram-retrieval/TEAM-HANDOFF.md), [daily/personal records](engram-retrieval/DAILY-AND-PERSONAL.md), [stream setup](engram-retrieval/STREAM-PROCESSING.md).
+This runs automated test cases checking:
+1. **Medication dosage inquiry refusal** (`dose_question: true`).
+2. **Fall / trauma emergency trigger** (`emergency: true`).
+3. **Severe distress de-escalation** (`distress: true`).
+4. **Missing personal memory anti-hallucination barrier**.
+5. **Database-grounded meal recall**.
+6. **Generic general knowledge resolution**.
 
-### Fictional medication reminder demo
+---
 
-See [the medication demo guide](docs/MEDICATION-DEMO.md) for simulation data, caregiver approval, timed reminders, patient responses and caregiver review. Seed with `npm run demo:seed-medication`. All medication details are fictional; patient responses are reports, not proof of ingestion.
+## 📱 Telegram Caregiver Commands
 
-### Automatic Gemini recovery
+Send any of the following to your Telegram Bot:
 
-The Patient Companion uses cancellable background reply jobs with bounded transient-error retries and fresh evidence checks. See [Gemini recovery](docs/GEMINI-RECOVERY.md) for endpoints, limits and verification. Jobs are in memory and do not survive server restart.
+| Command | Action |
+| :--- | :--- |
+| `/start` | Links your chat as the active caregiver recipient and shows status. |
+| `location` or `where is rhea` | Sends Rhea's current GPS coordinates with a Google Maps link and native map card. |
+| `enable location` | Turns on GPS map pinning for distress alerts. |
+| `disable location` | Turns off GPS map pinning. |
+| `summary` | Generates a daily summary of Rhea's recorded activities and meals. |
+| `alerts` | Lists recent safety and medication warnings. |
 
-### Familiar people and memory pictures
+---
 
-Caregiver tools now support picture uploads and approval. The companion retrieves matching approved pictures from MongoDB GridFS. See [image recall](docs/IMAGE-RECALL.md). Seed labelled fictional illustrations with `npm run demo:seed-images`; upload real authorised family pictures through the caregiver panel.
+## 🔒 Safety and Medical Notice
 
-### Phone receiver and SOS links
-
-Open `/phone` on a phone on the same Wi-Fi and pair it from caregiver tools. Approved pictures can forward automatically, and caregiver/demo receivers can receive SOS browser alerts. See [phone-link setup](docs/PHONE-LINK.md). Actual voice calls require private provider setup and explicit enabling; real calls are disabled in the demo.
-
-Phone delivery: see [PHONE-LINK.md](docs/PHONE-LINK.md). Background notification support and production deployment preparation: [DEPLOYMENT.md](docs/DEPLOYMENT.md). Local HTTP uses the open-page receiver; background Web Push requires HTTPS and handset opt-in. Real calls remain disabled by default.
-
-Free conversation-provider setup (OpenRouter or local Ollama): [FREE-MODEL-SETUP.md](docs/FREE-MODEL-SETUP.md). Gemini settings are preserved for switching back.
+Engram is an assistive companion designed for reassurance, memory orientation, and caregiver notification. It does not replace medical supervision, and under no circumstances provides prescription advice or clinical instructions.
