@@ -5,7 +5,7 @@ const ConversationSchema = new mongoose.Schema(
   {
     householdId: { type: String, default: "anchorcare-demo", index: true },
     subjectId: { type: String, default: "demo-person-001", index: true },
-    patientId: { type: String, default: "arthur_01", index: true },
+    patientId: { type: String, default: "rhea_01", index: true },
     role: { type: String, enum: ["user", "assistant"], required: true },
     content: { type: String, required: true },
     timestamp: { type: Date, default: Date.now },
@@ -18,7 +18,7 @@ const MemorySchema = new mongoose.Schema(
   {
     householdId: { type: String, default: "anchorcare-demo", index: true },
     subjectId: { type: String, default: "demo-person-001", index: true },
-    patientId: { type: String, default: "arthur_01", index: true },
+    patientId: { type: String, default: "rhea_01", index: true },
     who: [{ type: String }],
     what: { type: String, required: true },
     where: { type: String },
@@ -33,7 +33,7 @@ const AlertSchema = new mongoose.Schema(
   {
     householdId: { type: String, default: "anchorcare-demo", index: true },
     subjectId: { type: String, default: "demo-person-001", index: true },
-    patientId: { type: String, default: "arthur_01", index: true },
+    patientId: { type: String, default: "rhea_01", index: true },
     type: { type: String, required: true }, // 'EMERGENCY' | 'DOSE_QUERY' | 'DISTRESS'
     message: { type: String, required: true },
     timestamp: { type: Date, default: Date.now },

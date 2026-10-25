@@ -10,6 +10,8 @@ import { Conversation, Memory, Alert, Source, Episode } from "./models.js";
 import { processPatientAudio } from "./gemini.js";
 import { synthesizeSpeechBase64 } from "./tts.js";
 import { forwardMemoryToAnchorCare } from "./anchorcareDispatcher.js";
+import { evaluateSafetyAndAlert, updatePatientLocation } from "./agents/safetyAgent.js";
+import { startTelegramBotPolling } from "./agents/telegramAgent.js";
 
 dotenv.config();
 
@@ -30,14 +32,31 @@ const io = new Server(server, {
 const MONGO_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/engram";
 mongoose
   .connect(MONGO_URI)
-  .then(() => console.log(" Connected to MongoDB Atlas (engram database)"))
+  .then(() => {
+    console.log(" Connected to MongoDB Atlas (engram database)");
+    // Start Telegram multi-agent polling listener
+    startTelegramBotPolling("rhea_01");
+  })
   .catch((err) => console.warn(" MongoDB connection warning:", err.message));
 
-app.get("/health", (req, res) => {
-  res.json({ status: "healthy", database: "engram", service: "engram-companion-backend" });
+app.get("/", (req, res) => {
+  res.json({
+    name: "AnchorCare Multimodal Engram Backend",
+    status: "online",
+    activePatient: "rhea_01",
+    endpoints: {
+      health: "/health",
+      caregiverDashboardApi: "/api/caregiver/rhea_01",
+      socketIo: "ws://localhost:5000"
+    },
+    telegramBot: "@Anchorcarebot"
+  });
 });
 
-// Caregiver REST endpoint to fetch alerts & daily memories
+app.get("/health", (req, res) => {
+  res.json({ status: "healthy", database: "engram", service: "anchorcare-multimodal-backend" });
+});
+
 app.get("/api/caregiver/:patientId", async (req, res) => {
   try {
     const { patientId } = req.params;
@@ -50,7 +69,7 @@ app.get("/api/caregiver/:patientId", async (req, res) => {
 });
 
 // Main Multimodal Turn Handler
-async function handlePatientInput(patientId, { text, transcript, audioBase64, imageBase64, mimeType, cameraIsActive }) {
+async function handlePatientInput(patientId = "rhea_01", { text, transcript, audioBase64, imageBase64, mimeType, cameraIsActive }) {
   const householdId = "anchorcare-demo";
   const subjectId = "demo-person-001";
 
@@ -64,16 +83,22 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
 
   const attachedFrame = cameraIsActive ? imageBase64 : null;
 
-  // Process with Gemini / Knowledge Engine
+  // 1. Process with Gemini / Memory Retrieval Engine
   const result = await processPatientAudio(audioBase64, mimeType, history, memories, text || transcript, attachedFrame);
   const { spoken_response, extracted_memory, user_transcript, flags } = result;
 
   const displayUserText = text || transcript || user_transcript;
   const now = new Date();
 
-  // Persist directly into MongoDB Atlas 'engram' database tables
+  // 2. Safety Agent: Checks for injuries, distress, or dosage queries and sends push alerts to Telegram!
+  if (displayUserText) {
+    evaluateSafetyAndAlert(patientId, displayUserText, flags || {}).catch((err) => {
+      console.warn("Safety Agent Telegram alert error:", err.message);
+    });
+  }
+
+  // 3. Persist directly into MongoDB Atlas 'engram' database tables
   try {
-    // 1. Save to engram.conversations
     if (displayUserText) {
       await Conversation.create({
         householdId,
@@ -95,7 +120,6 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
       timestamp: new Date(),
     });
 
-    // 2. Save structured memory to engram.memories
     if (extracted_memory && extracted_memory.what) {
       const createdMemory = await Memory.create({
         householdId,
@@ -108,7 +132,7 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
         createdAt: now,
       });
 
-      // 3. Save into canonical AnchorCare tables: engram.sources & engram.episodes
+      // Canonical AnchorCare Ingestion Tables
       try {
         const sourceId = `source_${crypto.randomBytes(16).toString("hex")}`;
         await Source.create({
@@ -133,16 +157,15 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
           personIds: extracted_memory.who || [],
           eventStart: now,
           recordedAt: now,
-          reviewStatus: "pending_caregiver_review", // Always draft
+          reviewStatus: "pending_caregiver_review",
           eventStatus: "reported_completed",
           isCurrent: true,
         });
-        console.log(`✓ [Atlas Ingestion] Committed to engram.episodes (${episodeId}) and engram.sources (${sourceId})`);
       } catch (canonicalErr) {
         console.warn("Canonical episode/source save error:", canonicalErr.message);
       }
 
-      // 4. Background AnchorCare API forwarding
+      // Background AnchorCare Forwarding
       forwardMemoryToAnchorCare(createdMemory, !!cameraIsActive).catch((err) => {
         console.warn("Background AnchorCare forward error:", err.message);
       });
@@ -151,7 +174,7 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
     console.warn("DB save warning:", dbErr.message);
   }
 
-  // Check safety triggers (Emergency / Dosage Question / Distress)
+  // 4. Update UI with safety flags
   if (flags?.emergency || flags?.dose_question || flags?.distress) {
     const alertType = flags.emergency ? "EMERGENCY" : flags.dose_question ? "MEDICATION_DOSAGE" : "DISTRESS";
     const alertMsg = flags.emergency
@@ -178,13 +201,13 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
     });
   }
 
-  // Send assistant response update to client
+  // 5. Send assistant response update to client
   io.to(patientId).emit("conversation_update", {
     sender: "assistant",
     text: spoken_response,
   });
 
-  // Synthesize Speech and stream back audio
+  // 6. Synthesize Speech (TTS)
   const speechBase64 = await synthesizeSpeechBase64(spoken_response);
   if (speechBase64) {
     io.to(patientId).emit("audio_response", { audioBase64: speechBase64 });
@@ -195,7 +218,7 @@ async function handlePatientInput(patientId, { text, transcript, audioBase64, im
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
-  socket.join("arthur_01");
+  socket.join("rhea_01");
 
   socket.on("join_session", ({ patientId }) => {
     socket.join(patientId);
@@ -220,6 +243,11 @@ io.on("connection", (socket) => {
     const { patientId, text } = data;
     console.log(`[Text Event] Patient ${patientId}: "${text}"`);
     await handlePatientInput(patientId, { text, cameraIsActive: false });
+  });
+
+  // 3. Location update from patient device
+  socket.on("patient_location", (coords) => {
+    updatePatientLocation(coords);
   });
 
   socket.on("disconnect", () => {

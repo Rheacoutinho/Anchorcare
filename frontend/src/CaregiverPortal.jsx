@@ -4,7 +4,7 @@ import { ShieldAlert, Heart, Calendar, Clock, User, ArrowLeft, RefreshCw } from 
 import "./App.css";
 
 export default function CaregiverPortal({ onBack }) {
-  const [patientId] = useState("arthur_01");
+  const [patientId] = useState("rhea_01");
   const [memories, setMemories] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,7 +43,7 @@ export default function CaregiverPortal({ onBack }) {
         </button>
         <div className="patient-tag">
           <User size={18} />
-          <span>Patient: Arthur (Caregiver View)</span>
+          <span>Patient: Rhea (Caregiver View)</span>
         </div>
       </header>
 

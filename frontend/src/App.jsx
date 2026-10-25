@@ -5,7 +5,7 @@ import CaregiverPortal from "./CaregiverPortal";
 import "./App.css";
 
 export default function App() {
-  const [patientId] = useState("arthur_01");
+  const [patientId] = useState("rhea_01");
   const [view, setView] = useState("patient");
   const [active, setActive] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -199,6 +199,41 @@ export default function App() {
     socket.on("connect", () => {
       setConnected(true);
       socket.emit("join_session", { patientId });
+
+      // Transmit device coordinates continuously & on connect
+      const transmitLocation = () => {
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              console.log("Transmitting GPS coords:", pos.coords.latitude, pos.coords.longitude);
+              socket.emit("patient_location", {
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+                accuracy: pos.coords.accuracy,
+              });
+            },
+            async (err) => {
+              console.warn("Browser GPS permission error:", err.message);
+              // Fallback to IP-based approximate location if browser blocks GPS
+              try {
+                const ipRes = await fetch("https://ipapi.co/json/");
+                const ipData = await ipRes.json();
+                if (ipData.latitude && ipData.longitude) {
+                  socket.emit("patient_location", {
+                    latitude: ipData.latitude,
+                    longitude: ipData.longitude,
+                    city: ipData.city,
+                  });
+                }
+              } catch (_) {}
+            },
+            { timeout: 8000, enableHighAccuracy: true, maximumAge: 0 }
+          );
+        }
+      };
+
+      transmitLocation();
+      const locInterval = setInterval(transmitLocation, 30000); // refresh every 30s
     });
 
     socket.on("disconnect", () => {
@@ -333,7 +368,7 @@ export default function App() {
               messages.map((m, idx) => (
                 <div key={idx} className={`message-bubble ${m.sender}`}>
                   <span className="sender-label">
-                    {m.sender === "patient" ? "Arthur" : "Engram"}:
+                    {m.sender === "patient" ? "Rhea" : "Engram"}:
                   </span>
                   <p>{m.text}</p>
                 </div>
