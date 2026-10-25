@@ -9,6 +9,8 @@ import {
   setLocationTracking,
   isLocationTrackingEnabled,
   getLastKnownLocation,
+  setCaregiverPhoneNumber,
+  getCaregiverPhoneNumber,
 } from "./safetyAgent.js";
 import { processPatientAudio } from "../gemini.js";
 import { Memory, Conversation } from "../models.js";
@@ -54,8 +56,16 @@ export async function startTelegramBotPolling(patientId = "rhea_01") {
           const lower = userText.toLowerCase();
           if (lower === "/start" || lower === "help") {
             const trackingStatus = isLocationTrackingEnabled() ? "🟢 ENABLED" : "🔴 DISABLED (Caregiver Request Required)";
-            const welcome = `Hello ${msg.from?.first_name || "there"}! 👋\n\nI am the *AnchorCare Multi-Agent Companion*.\n\n🔔 *Caregiver Alerts Activated:* This chat is linked for Rhea.\n📍 *Location Feature:* ${trackingStatus}\n\n*Caregiver Commands:*\n• *enable location* — Turn on GPS map pin for distress alerts\n• *disable location* — Turn off location sharing\n• *location* — Request Rhea's current GPS location on the map now\n• *summary* — Get Rhea's daily activity & memory feed\n• *alerts* — Check recent safety or dosage warnings`;
+            const phone = getCaregiverPhoneNumber();
+            const welcome = `Hello ${msg.from?.first_name || "there"}! 👋\n\nI am the *AnchorCare Multi-Agent Companion*.\n\n🔔 *Caregiver Alerts:* This chat is linked for Rhea.\n📍 *Location Feature:* ${trackingStatus}\n📞 *Emergency Phone:* \`${phone}\`\n\n*Caregiver Commands:*\n• *set phone <number>* — Set the emergency call button number (e.g., _set phone +447123456789_)\n• *enable location* — Turn on GPS map pin for distress alerts\n• *disable location* — Turn off location sharing\n• *location* — Request Rhea's current GPS location on the map now\n• *summary* — Get Rhea's daily activity & memory feed\n• *alerts* — Check recent safety or dosage warnings`;
             await sendTelegramNotification(welcome, chatId);
+          } else if (lower.startsWith("set phone") || lower.startsWith("phone ")) {
+            const rawPhone = userText.replace(/^set phone\s*|^phone\s*/i, "").trim();
+            if (rawPhone) {
+              setCaregiverPhoneNumber(rawPhone);
+              const confirmMsg = `📞 *Emergency Phone Number Updated!*\n\nDistress alert messages will now feature a one-tap call button dialing: \`${rawPhone}\`.`;
+              await sendTelegramNotification(confirmMsg, chatId);
+            }
           } else if (lower.includes("enable location") || lower.includes("start location") || lower.includes("track location")) {
             setLocationTracking(true);
             const statusMsg = `📍 *Location Sharing Enabled!*\n\nFrom now on, whenever Rhea reports distress or an emergency, an exact Google Maps link and a pinned location will be dispatched to this chat.`;

@@ -58,21 +58,46 @@ export function getLastKnownLocation() {
   return LAST_KNOWN_LOCATION || DEFAULT_FALLBACK_COORDS;
 }
 
+let CAREGIVER_PHONE_NUMBER = process.env.CAREGIVER_PHONE_NUMBER || "999";
+
+/**
+ * Update or set caregiver emergency contact phone number
+ */
+export function setCaregiverPhoneNumber(phoneNumber) {
+  if (phoneNumber) {
+    CAREGIVER_PHONE_NUMBER = phoneNumber.trim();
+    console.log(`✓ [Telegram Sentinel] Caregiver phone number set to: ${CAREGIVER_PHONE_NUMBER}`);
+  }
+}
+
+export function getCaregiverPhoneNumber() {
+  return CAREGIVER_PHONE_NUMBER;
+}
+
 /**
  * Send an alert or message to a specific Telegram chat (or the default caregiver)
+ * Accepts optional inline_keyboard buttons (e.g. Call button, Map button)
  */
-export async function sendTelegramNotification(text, chatId = null) {
+export async function sendTelegramNotification(text, chatId = null, inlineKeyboard = null) {
   const targetChatId = chatId || CAREGIVER_CHAT_ID;
   if (!targetChatId) {
     console.warn("[Telegram Sentinel] No caregiver chat registered yet. Send '/start' to @Anchorcarebot on Telegram to link this chat!");
     return false;
   }
 
-  const payload = JSON.stringify({
+  const payloadObj = {
     chat_id: targetChatId,
     text: text,
     parse_mode: "Markdown",
-  });
+  };
+
+  if (inlineKeyboard) {
+    payloadObj.reply_markup = {
+      inline_keyboard: inlineKeyboard,
+    };
+  }
+
+  const payload = JSON.stringify(payloadObj);
 
   return new Promise((resolve) => {
     const req = https.request(
@@ -180,18 +205,39 @@ export async function evaluateSafetyAndAlert(patientId, text, flags = {}) {
 
   if (alertType) {
     const loc = getLastKnownLocation();
+    let mapUrl = null;
+
     // If location tracking is enabled by caregiver, append exact map link to the message
     if (LOCATION_TRACKING_ENABLED && loc) {
       const lat = loc.latitude;
       const lon = loc.longitude;
+      mapUrl = `https://maps.google.com/?q=${lat},${lon}`;
       const locLabel = loc.city ? ` (${loc.city})` : "";
-      alertMessage += `\n\n📍 *Exact Pinned Location${locLabel}:*\nhttps://maps.google.com/?q=${lat},${lon}`;
+      alertMessage += `\n\n📍 *Exact Pinned Location${locLabel}:*\n${mapUrl}`;
     } else if (!LOCATION_TRACKING_ENABLED) {
       alertMessage += `\n\n🔒 _Location sharing is currently disabled by caregiver. Type 'enable location' to receive live GPS map pins._`;
     }
 
-    // Deliver push alert directly to Telegram
-    await sendTelegramNotification(alertMessage);
+    // Build interactive action buttons: One-click Phone Call + Direct Map Link
+    const phone = getCaregiverPhoneNumber();
+    const actionButtons = [
+      [
+        {
+          text: `📞 Call Caregiver / Contact (${phone})`,
+          url: `tel:${phone}`,
+        },
+      ],
+    ];
+
+    if (mapUrl) {
+      actionButtons[0].push({
+        text: "🗺️ Open Map Pin",
+        url: mapUrl,
+      });
+    }
+
+    // Deliver push alert with interactive call button directly to Telegram
+    await sendTelegramNotification(alertMessage, null, actionButtons);
 
     // Also send native Telegram map pin if enabled
     if (LOCATION_TRACKING_ENABLED && loc) {
